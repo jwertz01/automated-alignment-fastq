@@ -2,6 +2,15 @@
 
 """Run bowtie2 alignment against a reference genome on FASTQ files from 
 recently converted bcltofastq diretories.
+
+The program reads the "SampleRef" and "Description" fields of the SampleSheet
+CSV file.  
+
+From these, it determines the reference genome to align against, and the type
+of experiment (DNAseq or RNAseq).  
+
+If DNAseq, then Bowtie2 is invoked on the reads. If RNASeq, then Tophat2 is
+invoked on the reads. 
 """
 
 import os
@@ -86,7 +95,6 @@ def single_or_paired(project_dir, sample, logger):
 def get_reference_genome(project_dir, sample, logger):
     sample_path = os.path.join(project_dir, sample)
     try:
-        os.path.exists(sample_path)
         tab = pd.read_csv(sample_path + '/SampleSheet.csv', header = 0)
         ref_genome = tab.loc[0,'SampleRef']
         logger.info('***"%s" reference genome code is: %s' % (sample, ref_genome))
@@ -106,6 +114,18 @@ def get_genome_index(ref_genome):
     return index_basename
 
     
+def bowtie_or_tophat(project_dir, sample, logger):
+    sample_path = os.path.join(project_dir, sample)
+    try:
+        tab = pd.read_csv(sample_path + '/SampleSheet.csv', header = 0)
+        exp_type = tab.loc[0,'Description']
+        logger.info('***"%s" is a %s type of experiment' % (sample, exp_type))
+        return exp_type
+            
+    except IOError: 
+        logger.info('***Could not find sample sheet or experiment code for %s' % sample_path)
+        raise
+    
     
 def run_bowtie2_paired(project_dir, sample, index_base_name, fastq_r1, fastq_r2, logger):
     '''Run bowtie2 in paired end mode for fastq files. 
@@ -122,7 +142,7 @@ def run_bowtie2_paired(project_dir, sample, index_base_name, fastq_r1, fastq_r2,
         '--phred33',
         '--sensitive',
         '--threads 8',
-        '-S', os.path.join(filepath, 'test_paired.out')
+        '-S', os.path.join(filepath, 'test_paired.sam')
     ]
     
     bwt2_process = subprocess.call(args)
@@ -153,21 +173,29 @@ def run_bowtie2_single(project_dir, sample, index_base_name, fastq, logger):
         '--phred33',
         '--sensitive',
         '--threads 8',
-        '-S', os.path.join(filepath, 'test_single.out')
+        '-S', os.path.join(filepath, 'test_single.sam')
     ]
     
-    logger.info(subprocess.check_output(args))
+    bwt2_process = subprocess.call(args)
     
-    #if not bwt2_process:  #return code of 0 is success
-    #    logger.info(
-    #        '***Bowtie2 alignment completed successfully for %s. Alignment %s' % (filepath, bwt2_process)
-    #    )
-    #else:
-    #    logger.info(
-    #        '***Error in bowtie2 alignment. Return code: %d' % bwt2_process
-    #    )
-    #
-    #return bwt2_process
+    if not bwt2_process:  #return code of 0 is success
+        logger.info(
+            '***Bowtie2 alignment completed successfully for %s' % filepath
+        )
+        
+    else:
+        logger.info(
+            '***Error in bowtie2 alignment. Return code: %d' % bwt2_process
+        )
+    
+    
+def run_tophat_single():
+    pass
+    
+
+def run_tophat_paired():
+    pass
+    
 
 
 if __name__ == '__main__':
