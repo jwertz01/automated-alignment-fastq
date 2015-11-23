@@ -41,16 +41,20 @@ def main():
     
     except IOError:
         logger.error(
-            'Cannot find list of directories to be aligned.'
-            'Check aligner.cfg')
+            'Cannot find list of directories to be aligned'
+            'Check aligner.cfg'
+        )
+        raise
         
-    
-    #try:
+
     for project in to_be_aligned:
         project_dir = os.path.join(base_dir, project)
         sample_names = [sample for sample in os.listdir(project_dir)
                         if os.path.isdir(os.path.join(project_dir, sample))]
         for sample in sample_names:
+            logger.info(
+                '***Working on sample "%s" in project directory "%s" now' % (sample, project_dir)
+            )
             paired_status, fastq = single_or_paired(project_dir, sample, logger)
             ref_genome = get_reference_genome(project_dir, sample, logger)
             index_basename = get_genome_index(ref_genome)
@@ -59,7 +63,6 @@ def main():
             else: 
                 run_bowtie2_paired(project_dir, sample, index_basename, fastq[0], fastq[1], logger)   
 
-    #except: pass
     
 def single_or_paired(project_dir, sample, logger):
     paired = True
@@ -69,28 +72,29 @@ def single_or_paired(project_dir, sample, logger):
         fastq = [f for f in files if f.endswith('fastq.gz') or f.endswith('fastq')]
         print fastq
         if len(fastq) == 2:
-            logger.info('Found paired end fastq files, %s.' % fastq)
+            logger.info('***Found paired end fastq files, %s, in %s' % (fastq, sample_path))
             return paired, fastq
         if len(fastq) == 1:
-            logger.info('Found single end fastq file, %s.' % fastq)
+            logger.info('***Found single end fastq file, %s, in %s' % (fastq, sample_path))
             paired = False
             return paired, fastq
         else: 
-            logger.info('%d Fastq Files found; Sample Dir %s; No alignment done.' % (len(fastq), sample_path))
+            logger.info('***%d Fastq Files found; Sample Dir %s; No alignment done' % (len(fastq), sample_path))
             return None
             
             
 def get_reference_genome(project_dir, sample, logger):
     sample_path = os.path.join(project_dir, sample)
-    if os.path.exists(sample_path):
+    try:
+        os.path.exists(sample_path)
         tab = pd.read_csv(sample_path + '/SampleSheet.csv', header = 0)
         ref_genome = tab.loc[0,'SampleRef']
-        logger.info('%s reference genome code is %s.' % (sample, ref_genome))
+        logger.info('***"%s" reference genome code is: %s' % (sample, ref_genome))
         return ref_genome
             
-    else: 
-        logger.info('Could not find sample or sample sheet for %s.' % sample_path)
-        return None
+    except IOError: 
+        logger.info('***Could not find sample sheet or ref genome code for %s' % sample_path)
+        raise
         
 def get_genome_index(ref_genome):
     gen_dict = {'mm9': '/mnt/hiseq2/genomes/mm9',
@@ -107,7 +111,7 @@ def run_bowtie2_paired(project_dir, sample, index_base_name, fastq_r1, fastq_r2,
     '''Run bowtie2 in paired end mode for fastq files. 
     Return path to bowtie2 output.
     '''
-    logger.info('Running bowtie2 on paired-end reads; aligned to ref %s.' % index_base_name)
+    logger.info('***Running bowtie2 on paired-end reads; aligned to ref %s' % index_base_name)
     filepath = os.path.join(project_dir, sample)
     args = [
         '/Applications/bowtie2-2.2.6/bowtie2',
@@ -125,11 +129,11 @@ def run_bowtie2_paired(project_dir, sample, index_base_name, fastq_r1, fastq_r2,
 
     if not bwt2_process:  #return code of 0 is success
         logger.info(
-            'bowtie2 alignment completed successfully for %s' % filepath
+            '***Bowtie2 alignment completed successfully for %s' % filepath
         )
     else:
         logger.info(
-            'Error in bowtie2 alignment? Return code: %d.' % bwt2_process
+            '***Error in bowtie2 alignment? Return code: %d' % bwt2_process
         )
     
     return bwt2_process
@@ -139,7 +143,7 @@ def run_bowtie2_single(project_dir, sample, index_base_name, fastq, logger):
     '''Run bowtie2 in single-end mode for fastq files. 
     Return path to bowtie2 output.
     '''
-    logger.info('Running bowtie2 on single-end reads; aligned to ref %s.' % index_base_name)
+    logger.info('***Running bowtie2 on single-end reads; aligned to ref %s' % index_base_name)
     filepath = os.path.join(project_dir, sample)
     args = [
         '/Applications/bowtie2-2.2.6/bowtie2',  #temp path for testing
@@ -152,17 +156,18 @@ def run_bowtie2_single(project_dir, sample, index_base_name, fastq, logger):
         '-S', os.path.join(filepath, 'test_single.out')
     ]
     
-    bwt2_process = subprocess.call(args)
-    if not bwt2_process:  #return code of 0 is success
-        logger.info(
-            'bowtie2 alignment completed successfully for %s' % filepath
-        )
-    else:
-        logger.info(
-            'Error in bowtie2 alignment. Return code: %d.' % bwt2_process
-        )
+    logger.info(subprocess.check_output(args))
     
-    return bwt2_process
+    #if not bwt2_process:  #return code of 0 is success
+    #    logger.info(
+    #        '***Bowtie2 alignment completed successfully for %s. Alignment %s' % (filepath, bwt2_process)
+    #    )
+    #else:
+    #    logger.info(
+    #        '***Error in bowtie2 alignment. Return code: %d' % bwt2_process
+    #    )
+    #
+    #return bwt2_process
 
 
 if __name__ == '__main__':
