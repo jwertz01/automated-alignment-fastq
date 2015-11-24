@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-"""Run bowtie2 alignment against a reference genome on FASTQ files from 
+"""Run alignment against a reference genome on FASTQ files from 
 recently converted bcltofastq diretories.
 
 The program reads the "SampleRef" and "Description" fields of the SampleSheet
@@ -9,8 +9,12 @@ CSV file.
 From these, it determines the reference genome to align against, and the type
 of experiment (DNAseq or RNAseq).  
 
-If DNAseq, then Bowtie2 is invoked on the reads. If RNASeq, then Tophat2 is
-invoked on the reads. 
+If DNAseq, then either BWA-MEM (default) or Bowtie2 is invoked on the reads. 
+If RNASeq, then Tophat2 is invoked on the reads. 
+
+The functions for calling Bowtie2 on the reads are present below but not used in 
+the script as written.  The script will have to be edited to use Bowtie2 instead 
+of BWA-MEM.  
 """
 
 import os
@@ -64,15 +68,28 @@ def main():
             logger.info(
                 '***Working on "%s" in project directory: %s' % (sample, project_dir)
             )
-            paired_status, fastq = single_or_paired(project_dir, sample, logger)
-            ref_genome = get_reference_genome(project_dir, sample, logger)
-            index_basename = get_genome_index(ref_genome)
-            if not paired_status:
-                run_bowtie2_single(project_dir, sample, index_basename, fastq, logger)    
-            else: 
-                run_bowtie2_paired(project_dir, sample, index_basename, fastq[0], fastq[1], logger)   
+            exp_type = dnaseq_or_rnaseq(project_dir, sample, logger)
+            if exp_type == 'dnaseq':
+                paired_status, fastq = single_or_paired(project_dir, sample, logger)
+                ref_genome = get_reference_genome(project_dir, sample, logger)
+                index_fa_name = get_genome_index(ref_genome, logger)
+                if not paired_status:
+                    run_bwamem_single(project_dir, sample, index_fa_name, fastq, logger)    
+                else: 
+                    run_bwamem_paired(project_dir, sample, index_fa_name, fastq[0], fastq[1], logger) 
+                      
+            if exp_type == 'rnaseq':
+                paired_status, fastq = single_or_paired(project_dir, sample, logger)
+                ref_genome = get_reference_genome(project_dir, sample, logger)
+                index_basename = get_genome_index(ref_genome, logger)
+                if not paired_status:
+                    run_tophat2_single(project_dir, sample, index_basename, fastq, logger)    
+                else: 
+                    run_tophat2_paired(project_dir, sample, index_basename, fastq[0], fastq[1], logger) 
+                      
+            else:
+                continue
 
-    
 def single_or_paired(project_dir, sample, logger):
     paired = True
     sample_path = os.path.join(project_dir, sample)
@@ -104,17 +121,20 @@ def get_reference_genome(project_dir, sample, logger):
             
     except IOError: 
         logger.info('***Could not find sample sheet or ref genome code for %s' % sample_path)
-        raise
+        continue
         
-def get_genome_index(ref_genome):
-    gen_dict = {'mm9': '/mnt/hiseq2/genomes/mm9',
+def get_genome_index(ref_genome, logger):
+    try:
+        gen_dict = {'mm9': '/mnt/hiseq2/genomes/mm9',
                 'mm10': '/mnt/hiseq2/genomes/mm10',
                 'hg19': '/mnt/hiseq2/genomes/hg19',
                 'hg38': '/mnt/hiseq2/genomes/hg38',
-                'LMBDA': '/Applications/bowtie2-2.2.6/example/index/lambda_virus'}  #for test, remove for production
-    index_basename = gen_dict[ref_genome]
-    return index_basename
-
+                'LMBDA': '/Applications/bwa-0.7.12/example/lambda_virus.fa'}  #for test, remove for production
+        index_basename = gen_dict[ref_genome]
+        return index_basename
+    except KeyError:
+        logger.info("Invalid reference genome.")
+        continue
     
 def dnaseq_or_rnaseq(project_dir, sample, logger):
     sample_path = os.path.join(project_dir, sample)
@@ -126,98 +146,138 @@ def dnaseq_or_rnaseq(project_dir, sample, logger):
             
     except IOError: 
         logger.info('***Could not find sample sheet or experiment code for %s' % sample_path)
-        raise
+        continue
     
 
 def run_bwamem_paired(project_dir, sample, index_fa_name, fastq_r1, fastq_r2, logger):
     '''Run BWA MEM in paired end mode for fastq files.
     '''
-    logger.info('***Running BWA-MEM on paired-end reads; aligned to ref %s' % index_base_name)
+    logger.info('***Running BWA-MEM on paired-end reads; aligned to ref %s' % index_fa_name)
     filepath = os.path.join(project_dir, sample)
     args = [
         '/Applications/bwa-0.7.12/bwa',
         'mem',
+        '-a',
         '-M',
-        '-t 16',
+        '-t 12',
         index_fa_name,
+        '<(gunzip',
         os.path.join(filepath, fastq_r1),
+        ')',
+        '<(gunzip',
         os.path.join(filepath, fastq_r2),
+        ')',
         '>', os.path.join(filepath, 'bwa_aln.sam')
     ]
     
+    bwamem_process = subprocess.call(args)
     
-def run_bwamem_single():
-    pass
-    
-
-def run_bowtie2_paired(project_dir, sample, index_base_name, fastq_r1, fastq_r2, logger):
-    '''Run bowtie2 in paired end mode for fastq files. 
-    '''
-    logger.info('***Running bowtie2 on paired-end reads; aligned to ref %s' % index_base_name)
-    filepath = os.path.join(project_dir, sample)
-    args = [
-        '/Applications/bowtie2-2.2.6/bowtie2',
-        #'/home/seqproc/bowtie2-2.2.6/bowtie2',
-        '-x', index_base_name,
-        '-1', os.path.join(filepath, fastq_r1),
-        '-2', os.path.join(filepath, fastq_r2),
-        '--phred33',
-        '--sensitive',
-        '--threads 8',
-        '-S', os.path.join(filepath, 'test_paired.sam')
-    ]
-    
-    bwt2_process = subprocess.call(args)
-
-    if not bwt2_process:  #return code of 0 is success
+    if not bwamem_process:  #return code of 0 is success
         logger.info(
-            '***Bowtie2 alignment completed successfully for %s' % filepath
+            '***BWA MEM alignment completed successfully for %s' % filepath
         )
     else:
         logger.info(
-            '***Error in bowtie2 alignment? Return code: %d' % bwt2_process
+            '***Error in BWA-MEM alignment. Return code: %d' % bwamem_process
         )
     
-    return bwt2_process
-
-
-def run_bowtie2_single(project_dir, sample, index_base_name, fastq, logger):
-    '''Run bowtie2 in single-end mode for fastq files. 
+    
+def run_bwamem_single(project_dir, sample, index_fa_name, fastq_r1, logger):
+    '''Run BWA MEM in single end mode for fastq files.
     '''
-    logger.info('***Running bowtie2 on single-end reads; aligned to ref %s' % index_base_name)
+    logger.info('***Running BWA-MEM on single-end reads; aligned to ref %s' % index_fa_name)
     filepath = os.path.join(project_dir, sample)
     args = [
-        '/Applications/bowtie2-2.2.6/bowtie2',  #temp path for testing
-        #'/home/seqproc/bowtie2-2.2.6/bowtie2',
-        '-x', index_base_name,
-        '-U', os.path.join(filepath, fastq[0]),
-        '--phred33',
-        '--sensitive',
-        '--threads 8',
-        '-S', os.path.join(filepath, 'test_single.sam')
+        '/Applications/bwa-0.7.12/bwa',
+        'mem',
+        '-a',
+        '-M',
+        '-t 12',
+        index_fa_name,
+        '<(gunzip', 
+        os.path.join(filepath, fastq_r1),
+        ')',
+        '>', os.path.join(filepath, 'bwa_aln.sam')
     ]
     
-    bwt2_process = subprocess.call(args)
+    bwamem_process = subprocess.call(args)
     
-    if not bwt2_process:  #return code of 0 is success
+    if not bwamem_process:  #return code of 0 is success
         logger.info(
-            '***Bowtie2 alignment completed successfully for %s' % filepath
+            '***BWA MEM alignment completed successfully for %s' % filepath
         )
-        
     else:
         logger.info(
-            '***Error in bowtie2 alignment. Return code: %d' % bwt2_process
+            '***Error in BWA-MEM alignment. Return code: %d' % bwamem_process
         )
-    
-    
-def run_tophat_single():
+   
+     
+def run_tophat2_single():
     pass
     
 
-def run_tophat_paired():
+def run_tophat2_paired():
     pass
     
-
+    
+#def run_bowtie2_paired(project_dir, sample, index_base_name, fastq_r1, fastq_r2, logger):
+#    '''Run bowtie2 in paired end mode for fastq files. 
+#    '''
+#    logger.info('***Running bowtie2 on paired-end reads; aligned to ref %s' % index_base_name)
+#    filepath = os.path.join(project_dir, sample)
+#    args = [
+#        '/Applications/bowtie2-2.2.6/bowtie2',
+#        #'/home/seqproc/bowtie2-2.2.6/bowtie2',
+#        '-x', index_base_name,
+#        '-1', os.path.join(filepath, fastq_r1),
+#        '-2', os.path.join(filepath, fastq_r2),
+#        '--phred33',
+#        '--sensitive',
+#        '--threads 8',
+#        '-S', os.path.join(filepath, 'test_paired.sam')
+#    ]
+#    
+#    bwt2_process = subprocess.call(args)
+#
+#    if not bwt2_process:  #return code of 0 is success
+#        logger.info(
+#            '***Bowtie2 alignment completed successfully for %s' % filepath
+#        )
+#    else:
+#        logger.info(
+#            '***Error in bowtie2 alignment? Return code: %d' % bwt2_process
+#        )
+#
+#
+#def run_bowtie2_single(project_dir, sample, index_base_name, fastq, logger):
+#    '''Run bowtie2 in single-end mode for fastq files. 
+#    '''
+#    logger.info('***Running bowtie2 on single-end reads; aligned to ref %s' % index_base_name)
+#    filepath = os.path.join(project_dir, sample)
+#    args = [
+#        '/Applications/bowtie2-2.2.6/bowtie2',  #temp path for testing
+#        #'/home/seqproc/bowtie2-2.2.6/bowtie2',
+#        '-x', index_base_name,
+#        '-U', os.path.join(filepath, fastq[0]),
+#        '--phred33',
+#        '--sensitive',
+#        '--threads 8',
+#        '-S', os.path.join(filepath, 'test_single.sam')
+#    ]
+#    
+#    bwt2_process = subprocess.call(args)
+#    
+#    if not bwt2_process:  #return code of 0 is success
+#        logger.info(
+#            '***Bowtie2 alignment completed successfully for %s' % filepath
+#        )
+#        
+#    else:
+#        logger.info(
+#            '***Error in bowtie2 alignment. Return code: %d' % bwt2_process
+#        )
+#    
+    
 
 if __name__ == '__main__':
     main()
