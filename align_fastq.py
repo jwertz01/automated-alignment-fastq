@@ -62,7 +62,7 @@ def main():
                         if os.path.isdir(os.path.join(project_dir, sample))]
         for sample in sample_names:
             logger.info(
-                '***Working on sample "%s" in project directory "%s" now' % (sample, project_dir)
+                '***Working on "%s" in project directory: %s' % (sample, project_dir)
             )
             paired_status, fastq = single_or_paired(project_dir, sample, logger)
             ref_genome = get_reference_genome(project_dir, sample, logger)
@@ -78,17 +78,19 @@ def single_or_paired(project_dir, sample, logger):
     sample_path = os.path.join(project_dir, sample)
     if os.path.exists(sample_path):
         files = os.listdir(sample_path)
-        fastq = [f for f in files if f.endswith('fastq.gz') or f.endswith('fastq')]
-        print fastq
-        if len(fastq) == 2:
-            logger.info('***Found paired end fastq files, %s, in %s' % (fastq, sample_path))
-            return paired, fastq
-        if len(fastq) == 1:
-            logger.info('***Found single end fastq file, %s, in %s' % (fastq, sample_path))
+        fastq_list = [f for f in files if f.endswith('fastq.gz') or f.endswith('fastq')]
+        if len(fastq_list) == 2:
+            logger.info('***Found paired end fastq files in directory %s' % sample_path)
+            logger.info('***Found fastq files, %s,%s' % (fastq_list[0], fastq_list[1]))
+            return paired, fastq_list
+        if len(fastq_list) == 1:
+            logger.info('***Found fastq file in directory: %s' % sample_path)
+            logger.info('***Single end fastq file: %s' % fastq_list[0])
+            
             paired = False
-            return paired, fastq
+            return paired, fastq_list
         else: 
-            logger.info('***%d Fastq Files found; Sample Dir %s; No alignment done' % (len(fastq), sample_path))
+            logger.info('***%d Fastq Files found; Sample Dir %s; No alignment done' % (len(fastq_list), sample_path))
             return None
             
             
@@ -114,7 +116,7 @@ def get_genome_index(ref_genome):
     return index_basename
 
     
-def bowtie_or_tophat(project_dir, sample, logger):
+def dnaseq_or_rnaseq(project_dir, sample, logger):
     sample_path = os.path.join(project_dir, sample)
     try:
         tab = pd.read_csv(sample_path + '/SampleSheet.csv', header = 0)
@@ -126,10 +128,30 @@ def bowtie_or_tophat(project_dir, sample, logger):
         logger.info('***Could not find sample sheet or experiment code for %s' % sample_path)
         raise
     
+
+def run_bwamem_paired(project_dir, sample, index_fa_name, fastq_r1, fastq_r2, logger):
+    '''Run BWA MEM in paired end mode for fastq files.
+    '''
+    logger.info('***Running BWA-MEM on paired-end reads; aligned to ref %s' % index_base_name)
+    filepath = os.path.join(project_dir, sample)
+    args = [
+        '/Applications/bwa-0.7.12/bwa',
+        'mem',
+        '-M',
+        '-t 16',
+        index_fa_name,
+        os.path.join(filepath, fastq_r1),
+        os.path.join(filepath, fastq_r2),
+        '>', os.path.join(filepath, 'bwa_aln.sam')
+    ]
     
+    
+def run_bwamem_single():
+    pass
+    
+
 def run_bowtie2_paired(project_dir, sample, index_base_name, fastq_r1, fastq_r2, logger):
     '''Run bowtie2 in paired end mode for fastq files. 
-    Return path to bowtie2 output.
     '''
     logger.info('***Running bowtie2 on paired-end reads; aligned to ref %s' % index_base_name)
     filepath = os.path.join(project_dir, sample)
@@ -161,7 +183,6 @@ def run_bowtie2_paired(project_dir, sample, index_base_name, fastq_r1, fastq_r2,
 
 def run_bowtie2_single(project_dir, sample, index_base_name, fastq, logger):
     '''Run bowtie2 in single-end mode for fastq files. 
-    Return path to bowtie2 output.
     '''
     logger.info('***Running bowtie2 on single-end reads; aligned to ref %s' % index_base_name)
     filepath = os.path.join(project_dir, sample)
