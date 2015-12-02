@@ -98,7 +98,7 @@ def single_or_paired(project_dir, sample, logger):
     sample_path = os.path.join(project_dir, sample)
     if os.path.exists(sample_path):
         files = os.listdir(sample_path)
-        fastq_list = [f for f in files if f.endswith('fastq.gz') or f.endswith('fastq')]
+        fastq_list = [f for f in files if f.endswith(('fastq.gz', 'fq.gz', 'fastq', '.fq'))] #catch all types of fastq files
         if len(fastq_list) == 2:
             logger.info('***Found paired end fastq files in directory %s' % sample_path)
             logger.info('***Found fastq files, %s,%s' % (fastq_list[0], fastq_list[1]))
@@ -120,7 +120,7 @@ def get_reference_genome(project_dir, sample, logger):
         tab = pd.read_csv(sample_path + '/SampleSheet.csv', header = 0)
         ref_genome = tab.loc[0,'SampleRef']
         logger.info('***"%s" reference genome code is: %s' % (sample, ref_genome))
-        return ref_genome
+        return ref_genome.strip().lower()
             
     except IOError: 
         logger.info('***Could not find sample sheet or ref genome code for %s' % sample_path)
@@ -133,7 +133,10 @@ def get_genome_index(ref_genome, logger):
                 'mm10': '/mnt/hiseq2/genomes/mm10',
                 'hg19': '/mnt/hiseq2/genomes/hg19',
                 'hg38': '/mnt/hiseq2/genomes/hg38',
-                'LMBDA': '/Applications/bwa-0.7.12/example/lambda_virus.fa'}  #for test, remove for production
+                'lmbda': '/Applications/bwa-0.7.12/example/lambda_virus.fa', #for testing 
+                'unk' : '/Applications/tophat-2.1.0.OSX_x86_64/test_data/test_ref'  #for testing
+                } 
+                
         index_basename = gen_dict[ref_genome]
         return index_basename
     except KeyError:
@@ -147,12 +150,16 @@ def dnaseq_or_rnaseq(project_dir, sample, logger):
         tab = pd.read_csv(sample_path + '/SampleSheet.csv', header = 0)
         exp_type = tab.loc[0,'Description']
         logger.info('***"%s" is a %s type of experiment' % (sample, exp_type))
-        return exp_type
+        return exp_type.strip().lower()
             
     except IOError: 
-        logger.info('***Could not find sample sheet or experiment code for %s' % sample_path)
+        logger.info('***Could not find sample sheet in %s' % sample_path)
         return None
     
+    except AttributeError:
+        logger.info('***No experiment type field in the Sample Sheet in %s' % sample_path)
+        return None
+
 
 def run_bwamem_paired(project_dir, sample, index_fa_name, fastq_r1, fastq_r2, logger):
     '''Run BWA MEM in paired end mode for fastq files.  BWA-MEM doesn't offer an option 
@@ -218,20 +225,21 @@ def run_bwamem_single(project_dir, sample, index_fa_name, fastq_r1, logger):
 def run_tophat2_paired(project_dir, sample, index_basename, fastq_r1, fastq_r2, logger):
     '''Run tophat2 in paired-end mode for fastq files. 
     '''
-    logger.info('***Running tophat2 on single-end reads; aligned to ref %s' % index_basename)
+    logger.info('***Running tophat2 on paired-end reads; aligned to ref %s' % index_basename)
     filepath = os.path.join(project_dir, sample)
     args = [
         '/Applications/tophat-2.1.0.OSX_x86_64/tophat2',  #temp path for testing
-        #'/home/seqproc/tophat2/
-        '--num-threads 10',
-        '--mate-inner-dist 200',
-        '--max-multihits 1',
-        '--splice-mismatches 1',
+        #'/home/seqproc/tophat2/'
+        '--num-threads','10',
+        '--mate-inner-dist','200',
+        '--max-multihits' ,'1',
+        '--splice-mismatches', '1',
         index_basename,
         os.path.join(filepath, fastq_r1),
-        os.path.join(filepath, fastq_r2),
+        os.path.join(filepath, fastq_r2)
     ]
     
+    print subprocess.list2cmdline(args)
     top2_process = subprocess.call(args)
     
     if not top2_process:  #return code of 0 is success
@@ -253,14 +261,12 @@ def run_tophat2_single(project_dir, sample, index_basename, fastq_r1, logger):
     args = [
         '/Applications/tophat2/tophat2',  #temp path for testing
         #'/home/seqproc/tophat2/
-        '--num-threads 10',
-        '--mate-inner-dist 200',
-        '--max-multihits 1',
-        '--splice-mismatches 1',
+        '--num-threads','10',
+        '--mate-inner-dist','200',
+        '--max-multihits' ,'1',
+        '--splice-mismatches', '1',
         index_basename,
         os.path.join(filepath, fastq_r1)
-        ,
-        
     ]
     
     top2_process = subprocess.call(args)
